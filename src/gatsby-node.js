@@ -65,7 +65,8 @@ function recursiveFolders(array, parent = '', token, destination) {
           new Promise(async (resolve, reject) => {
             // If it`s a file, download it and convert to buffer.
             const dest = path.join(destination, parent, getFilenameByMime(file));
-
+            const metaData = await googleapi.getFileMetadata(file.id, token);
+            console.log("Retrieved metadata", metaData);
             if (fs.existsSync(dest)) {
               resolve(getFilenameByMime(file));
               return log(`Using cached ${getFilenameByMime(file)}`);
@@ -74,7 +75,7 @@ function recursiveFolders(array, parent = '', token, destination) {
             const buffer = file.mimeType === GOOGLE_DOC
               ? await middleware(googleapi.getGDoc(file.id, token, exportMime))
               : await googleapi.getFile(file.id, token);
-
+            
             // Finally, write buffer to file.
             fs.writeFile(dest, buffer, err => {
               if (err) return log(err);
