@@ -110,6 +110,10 @@ function requestFileMetadata(resolve, reject, fileId, token, delay) {
     (err, res, body) => {
       if (err) {
         reject(err);
+      } else if (res.statusCode == 403) {
+        setTimeout(() => {
+          requestFileMetadata(resolve, reject, fileId, token, delay * 2);
+        }, delay * 2);
       } else {
         resolve(JSON.parse(body));
       }
