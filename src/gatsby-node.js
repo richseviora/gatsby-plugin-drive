@@ -2,8 +2,9 @@ const googleapi = require(`./googleapis`);
 const path = require(`path`);
 const mkdirp = require(`mkdirp`);
 const fs = require(`fs`);
+const crypto = require("crypto");
 
-const log = str => console.log(`\n\n🚗 `, str);
+const log = str => console.log(`\n🚗 `, str);
 const FOLDER = `application/vnd.google-apps.folder`;
 const GOOGLE_DOC = "application/vnd.google-apps.document";
 
@@ -71,16 +72,26 @@ function recursiveFolders(array, parent = "", token, destination, gatsbyApi) {
         promises.push(
           new Promise(async (resolve, reject) => {
             // If it`s a file, download it and convert to buffer.
-            const dest = path.join(
-              destination,
-              parent,
-              getFilenameByMime(file)
-            );
+            const newFilename = getFilenameByMime(file);
+            const dest = path.join(destination, parent, newFilename);
             const metaData = await googleapi.getFileMetadata(file.id, token);
             if (fs.existsSync(dest)) {
-              createNode(gatsbyApi, dest, metaData);
-              resolve(getFilenameByMime(file));
-              return log(`Using cached ${getFilenameByMime(file)}`);
+              createNode(gatsbyApi, dest, metaData, newFilename);
+              resolve(newFilename);
+              return log(`File ID: ${file.id} Using cached ${newFilename}`);
+            }
+            const oldDest = path.join(
+              destination,
+              parent,
+              getOldFilenameByMime(file)
+            );
+            if (fs.existsSync(oldDest)) {
+              fs.renameSync(oldDest, dest);
+              createNode(gatsbyApi, dest, metaData, newFilename);
+              resolve(newFilename);
+              return log(
+                `File ID: ${file.id} Renamed original file ${oldDest}`
+              );
             }
 
             const buffer =
@@ -93,9 +104,9 @@ function recursiveFolders(array, parent = "", token, destination, gatsbyApi) {
             // Finally, write buffer to file.
             fs.writeFile(dest, buffer, err => {
               if (err) return log(err);
-              createNode(gatsbyApi, dest, metaData);
-              log(`Saved file ${getFilenameByMime(file)}`);
-              resolve(getFilenameByMime(file));
+              createNode(gatsbyApi, dest, metaData, newFilename);
+              log(`File ID: ${file.id} Saved file ${newFilename}`);
+              resolve(newFilename);
             });
           })
         );
@@ -121,6 +132,19 @@ const fileExtensionsByMime = new Map([
 ]);
 
 const getFilenameByMime = file => {
+  const parsedName = path.parse(file.name);
+  const extension =
+    file.mimeType === GOOGLE_DOC
+      ? fileExtensionsByMime.get(exportMime)
+      : parsedName.ext;
+  const hashedId = crypto
+    .createHash("sha256")
+    .update(file.id)
+    .digest("hex");
+  return `${hashedId}${extension}`;
+};
+
+const getOldFilenameByMime = file => {
   if (file.mimeType === GOOGLE_DOC) {
     return `${file.name}${fileExtensionsByMime.get(exportMime)}`;
   } else {
@@ -128,18 +152,21 @@ const getFilenameByMime = file => {
   }
 };
 
-function createNode(gatsbyApi, dest, metaData) {
-  const node = {
+function createNode(gatsbyApi, dest, metaData, newFilename) {
+  const nodeWithoutDigest = {
     localPath: dest,
+    generatedFileName: newFilename,
     name: metaData.name,
     googleId: metaData.id,
     createdTime: metaData.createdTime,
     webContentLink: metaData.webContentLink,
-    id: gatsbyApi.createNodeId(`DriveDownload-${metaData.id}`),
+    id: gatsbyApi.createNodeId(`DriveDownload-${metaData.id}`)
+  };
+  const node = Object.assign({}, nodeWithoutDigest, {
     internal: {
       type: "DriveDownload",
-      contentDigest: gatsbyApi.createContentDigest(metaData)
+      contentDigest: gatsbyApi.createContentDigest(nodeWithoutDigest)
     }
-  }
+  });
   gatsbyApi.actions.createNode(node);
 }
