@@ -43,7 +43,7 @@ const getFolderInternal = (
     },
     qs: {
       q: `'${folderId}' in parents`,
-      pageSize: 100,
+      pageSize: 1000,
       fields: "kind,nextPageToken,files(id,name,kind,mimeType,modifiedTime)"
     }
   };
