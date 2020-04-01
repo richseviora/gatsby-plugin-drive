@@ -30,7 +30,7 @@ exports.onPreBootstrap = (firstArg, optionsArg) => {
     const token = keyFile
       ? await googleapi.getToken({ keyFile })
       : await googleapi.getToken({ key });
-    const cmsFiles = await googleapi.getFolder(folderId, token);
+    const cmsFiles = await googleapi.getFolder(folderId, token, log);
     shouldExportGDocs = exportGDocs;
     exportMime = exportMimeType;
     middleware = exportMiddleware === undefined ? x => x : exportMiddleware;
@@ -64,7 +64,7 @@ function recursiveFolders(array, parent = "", token, destination, gatsbyApi) {
         mkdirp(path.join(destination, parent, file.name));
 
         // Then, get the files inside and run the function again.
-        const files = await googleapi.getFolder(file.id, token);
+        const files = await googleapi.getFolder(file.id, token, log);
         promises.push(
           recursiveFolders(files, `${parent}/${file.name}`, token, destination)
         );
@@ -74,9 +74,8 @@ function recursiveFolders(array, parent = "", token, destination, gatsbyApi) {
             // If it`s a file, download it and convert to buffer.
             const newFilename = getFilenameByMime(file);
             const dest = path.join(destination, parent, newFilename);
-            const metaData = await googleapi.getFileMetadata(file.id, token);
             if (fs.existsSync(dest)) {
-              createNode(gatsbyApi, dest, metaData, newFilename);
+              createNode(gatsbyApi, dest, file, newFilename);
               resolve(newFilename);
               return log(`File ID: ${file.id} Using cached ${newFilename}`);
             }
@@ -87,7 +86,7 @@ function recursiveFolders(array, parent = "", token, destination, gatsbyApi) {
             );
             if (fs.existsSync(oldDest)) {
               fs.renameSync(oldDest, dest);
-              createNode(gatsbyApi, dest, metaData, newFilename);
+              createNode(gatsbyApi, dest, file, newFilename);
               resolve(newFilename);
               return log(
                 `File ID: ${file.id} Renamed original file ${oldDest}`
@@ -97,14 +96,14 @@ function recursiveFolders(array, parent = "", token, destination, gatsbyApi) {
             const buffer =
               file.mimeType === GOOGLE_DOC
                 ? await middleware(
-                    googleapi.getGDoc(file.id, token, exportMime)
+                    googleapi.getGDoc(file.id, token, exportMime, log)
                   )
-                : await googleapi.getFile(file.id, token);
+                : await googleapi.getFile(file.id, token, log);
 
             // Finally, write buffer to file.
             fs.writeFile(dest, buffer, err => {
               if (err) return log(err);
-              createNode(gatsbyApi, dest, metaData, newFilename);
+              createNode(gatsbyApi, dest, file, newFilename);
               log(`File ID: ${file.id} Saved file ${newFilename}`);
               resolve(newFilename);
             });
@@ -158,8 +157,7 @@ function createNode(gatsbyApi, dest, metaData, newFilename) {
     generatedFileName: newFilename,
     name: metaData.name,
     googleId: metaData.id,
-    createdTime: metaData.createdTime,
-    webContentLink: metaData.webContentLink,
+    modifiedTime: metaData.modifiedTime,
     id: gatsbyApi.createNodeId(`DriveDownload-${metaData.id}`)
   };
   const node = Object.assign({}, nodeWithoutDigest, {

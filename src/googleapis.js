@@ -1,6 +1,8 @@
 const { GoogleToken } = require("gtoken");
 const request = require("request");
 
+const delayInMs = 105 * 1000;
+
 const getToken = ({ keyFile, key }) => {
   return new Promise((resolve, reject) => {
     const scope = ["https://www.googleapis.com/auth/drive"];
@@ -25,48 +27,84 @@ const getToken = ({ keyFile, key }) => {
   });
 };
 
-const getFolder = (folderId, token) => {
-  return new Promise((resolve, reject) => {
-    request(
-      {
-        uri: `https://www.googleapis.com/drive/v3/files`,
-        auth: {
-          bearer: token
-        },
-        qs: {
-          q: `'${folderId}' in parents`,
-          pageSize: 1000
-        }
-      },
-      (err, res, body) => {
-        if (err) {
-          reject(err);
-        } else {
-          resolve(JSON.parse(body).files);
-        }
+const getFolderInternal = (
+  folderId,
+  token,
+  log,
+  resolve,
+  reject,
+  nextPageToken = null,
+  fileArray = []
+) => {
+  const options = {
+    uri: `https://www.googleapis.com/drive/v3/files`,
+    auth: {
+      bearer: token
+    },
+    qs: {
+      q: `'${folderId}' in parents`,
+      pageSize: 100,
+      fields: "kind,nextPageToken,files(id,name,kind,mimeType,modifiedTime)"
+    }
+  };
+  if (nextPageToken) {
+    options.qs.pageToken = nextPageToken;
+  }
+  request(options, (err, res, body) => {
+    if (err) {
+      reject(err);
+    } else {
+      const parsedBody = JSON.parse(body);
+      const newFileArray = fileArray.concat(parsedBody.files);
+      if (parsedBody.nextPageToken) {
+        log("Fetching additional page");
+        getFolderInternal(
+          folderId,
+          token,
+          log,
+          resolve,
+          reject,
+          parsedBody.nextPageToken,
+          newFileArray
+        );
+      } else {
+        resolve(newFileArray);
       }
-    );
+    }
   });
 };
 
-const getFile = (fileId, token) => {
+const getFolder = (
+  folderId,
+  token,
+  log,
+  nextPageToken = null,
+  fileArray = []
+) => {
   return new Promise((resolve, reject) => {
-    requestFile(resolve, reject, fileId, token, 1100);
+    getFolderInternal(folderId, token, log, resolve, reject);
+  });
+};
+
+const getFile = (fileId, token, log) => {
+  return new Promise((resolve, reject) => {
+    requestFile(resolve, reject, fileId, token, delayInMs, log);
   });
 };
 
 /**
- * 
- * 
- * @returns [Promise<FileMetadata>] 
- */ 
-const getFileMetadata = (fileId, token) => {
-  return new Promise((resolve, reject) => {
-    requestFileMetadata(resolve, reject, fileId, token, 1100);
-  })
-}
+ *
+ *
+ * @returns [Promise<FileMetadata>]
+ */
 
-const getGDoc = (fileId, token, mimeType) => {
+const getFileMetadata = (fileId, token, log) => {
+  return new Promise((resolve, reject) => {
+    requestFileMetadata(resolve, reject, fileId, token, delayInMs);
+  });
+};
+
+const getGDoc = (fileId, token, mimeType, log) => {
   return new Promise((resolve, reject) => {
     request(
       {
@@ -95,7 +133,7 @@ module.exports = {
   getFolder,
   getFile,
   getGDoc,
-  getFileMetadata,
+  getFileMetadata
 };
 
 function requestFileMetadata(resolve, reject, fileId, token, delay) {
@@ -112,8 +150,8 @@ function requestFileMetadata(resolve, reject, fileId, token, delay) {
         reject(err);
       } else if (res.statusCode == 403) {
         setTimeout(() => {
-          requestFileMetadata(resolve, reject, fileId, token, delay * 2);
-        }, delay * 2);
+          requestFileMetadata(resolve, reject, fileId, token, delay);
+        }, delay);
       } else {
         resolve(JSON.parse(body));
       }
@@ -121,7 +159,7 @@ function requestFileMetadata(resolve, reject, fileId, token, delay) {
   );
 }
 
-function requestFile(resolve, reject, fileId, token, delay) {
+function requestFile(resolve, reject, fileId, token, delay, log) {
   request(
     {
       uri: `https://www.googleapis.com/drive/v3/files/${fileId}`,
@@ -137,9 +175,10 @@ function requestFile(resolve, reject, fileId, token, delay) {
       if (err) {
         reject(err);
       } else if (res.statusCode == 403) {
+        log("rate limited, waiting");
         setTimeout(() => {
-          requestFile(resolve, reject, fileId, token, delay * 2);
-        }, delay * 2);
+          requestFile(resolve, reject, fileId, token, delay);
+        }, delay);
       } else {
         resolve(body);
       }
